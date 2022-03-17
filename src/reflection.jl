@@ -154,7 +154,11 @@ function process_info(interp, @nospecialize(info), argtypes::ArgTypes, @nospecia
                 linfo = result.mi
                 effects = get_effects(result)
                 mici = MICallInfo(linfo, rt, effects)
-                ConcreteCallInfo(mici, argtypes)
+                if isdefined(Compiler, :SemiConcreteResult) && isa(result, Compiler.SemiConcreteResult)
+                    SemiConcreteCallInfo(mici, argtypes, result.ir)
+                else
+                    ConcreteCallInfo(mici, argtypes)
+                end
             else
                 @assert isa(result, Compiler.InferenceResult)
                 linfo = result.linfo

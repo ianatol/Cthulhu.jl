@@ -127,6 +127,11 @@ function Compiler.inlining_policy(interp::CthulhuInterpreter)
 end
 end # @static if isdefined(Compiler, :is_stmt_inline)
 
+function Compiler.codeinst_to_ir(interp::CthulhuInterpreter, code::CodeInstance)
+     isa(code.inferred, Nothing) && return nothing
+     return Compiler.copy((code.inferred::OptimizedSource).ir)
+end
+
 function Compiler.finish!(interp::CthulhuInterpreter, caller::InferenceResult)
     effects = EFFECTS_ENABLED ? caller.ipo_effects : nothing
     caller.src = maybe_create_optsource(caller.src, effects)

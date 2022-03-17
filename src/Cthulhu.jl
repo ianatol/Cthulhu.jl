@@ -245,7 +245,7 @@ end
     get_effects(result::InferenceResult) = result.ipo_effects
     @static if VERSION ≥ v"1.9.0-DEV.409"
         get_effects(result::Compiler.ConstPropResult) = get_effects(result.result)
-        get_effects(result::Compiler.ConcreteResult) = result.effects
+        get_effects(result::Compiler.ConstResult) = result.effects # Union{ConcreteResult, SemiConcreteResult}
     else
         get_effects(result::Compiler.ConstResult) = result.effects
     end
@@ -300,7 +300,7 @@ end
 # src/ui.jl provides the user facing interface to which _descend responds
 ##
 function _descend(term::AbstractTerminal, interp::CthulhuInterpreter, mi::MethodInstance;
-    override::Union{Nothing,InferenceResult}=nothing, debuginfo::Union{Symbol,DebugInfo}=DInfo.compact, # default is compact debuginfo
+    override::Union{Nothing,InferenceResult,SemiConcreteCallInfo}=nothing, debuginfo::Union{Symbol,DebugInfo}=DInfo.compact, # default is compact debuginfo
     optimize::Bool=true, interruptexc::Bool=true,
     iswarn::Bool=false, hide_type_stable::Union{Nothing,Bool}=nothing, verbose::Union{Nothing,Bool}=nothing,
     remarks::Bool=false, with_effects::Bool=false, inline_cost::Bool=false, type_annotations::Bool=true)
@@ -332,7 +332,14 @@ function _descend(term::AbstractTerminal, interp::CthulhuInterpreter, mi::Method
             callsites = Callsite[]
         else
             if override !== nothing
-                if optimize
+                if isa(override, SemiConcreteCallInfo)
+                    src = Compiler.copy(override.ir)
+                    rt = get_rt(override)
+                    infos = src.stmts.info
+                    slottypes = src.argtypes
+                    effects = get_effects(override)
+                    (;codeinf) = lookup(interp, mi, optimize)
+                elseif optimize
                     opt = override.src
                     rt = override.result
                     if isa(opt, Compiler.OptimizationState)
@@ -372,7 +379,7 @@ function _descend(term::AbstractTerminal, interp::CthulhuInterpreter, mi::Method
                 (; src, rt, infos, slottypes, codeinf, effects) = lookup(interp, mi, optimize)
             end
             src = preprocess_ci!(src, mi, optimize, CONFIG)
-            if optimize # optimization might have deleted some statements
+            if optimize || isa(src, IRCode) # optimization might have deleted some statements
                 infos = src.stmts.info
             else
                 @assert length(src.code) == length(infos)
@@ -477,8 +484,14 @@ function _descend(term::AbstractTerminal, interp::CthulhuInterpreter, mi::Method
                 continue
             end
 
+            doverride = nothing
+            if isa(info, ConstPropCallInfo)
+                doverride = info.result
+            elseif isa(info, SemiConcreteCallInfo)
+                doverride = info
+            end
             _descend(term, interp, next_mi;
-                     override = isa(info, ConstPropCallInfo) ? info.result : nothing, debuginfo,
+                     override = doverride, debuginfo,
                      optimize, interruptexc,
                      iswarn, hide_type_stable,
                      remarks, with_effects, inline_cost, type_annotations)
@@ -664,7 +677,7 @@ with the option to `descend` into intermediate calls. `kwargs` are passed to [`d
 """
 ascend
 
-if ccall(:jl_generating_output, Cint, ()) == 1
+if false && ccall(:jl_generating_output, Cint, ()) == 1
     input = Pipe()
     Base.link_pipe!(input, reader_supports_async=true, writer_supports_async=true)
     term = REPL.Terminals.TTYTerminal("dumb", input.out, IOBuffer(), IOBuffer())
